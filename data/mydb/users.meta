@@ -1,0 +1,4 @@
+id int
+name text
+age int
+city text
