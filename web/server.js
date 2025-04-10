@@ -28,17 +28,12 @@ let currentDatabase = null;
 let persistentSocket = null;
 let isConnecting = false;
 let connectionQueue = [];
-let activeRequests = new Map(); // Map để theo dõi các yêu cầu đang hoạt động
+let activeRequests = new Map(); // Map để theo dọi các yêu cầu đang hoạt động
+let lastActivity = Date.now();
+let nextRequestId = 1;
 
-// Hàm để đảm bảo có kết nối TCP
-function ensureConnection(callback) {
-    // Nếu đã có kết nối và socket vẫn mở
-    if (persistentSocket && !persistentSocket.destroyed) {
-        callback(null, persistentSocket);
-        return;
-    }
-    
-    // Nếu đang trong quá trình kết nối, thêm vào hàng đợi
+// Hàm để tạo kết nối TCP mới
+function createConnection(callback) {
     if (isConnecting) {
         connectionQueue.push(callback);
         return;
@@ -49,13 +44,14 @@ function ensureConnection(callback) {
     
     const socket = new net.Socket();
     
-    // Thiết lập timeout
-    socket.setTimeout(10000); // 10 giây timeout
+    // Vô hiệu hóa timeout của socket
+    socket.setTimeout(0);
     
     socket.connect(8080, '127.0.0.1', function() {
         console.log('[TCP] Connected to DuckSQL server');
         persistentSocket = socket;
         isConnecting = false;
+        lastActivity = Date.now();
         
         // Gọi callback hiện tại
         callback(null, socket);
@@ -67,12 +63,57 @@ function ensureConnection(callback) {
         }
     });
     
+    // Lắng nghe dữ liệu để cập nhật lastActivity và xử lý các phản hồi
+    socket.on('data', function(data) {
+        lastActivity = Date.now();
+        let responseData = data.toString('utf8');
+        console.log('[TCP] Received data:', responseData);
+        
+        try {
+            // Kiểm tra xem có phải JSON hợp lệ không
+            const parsedData = JSON.parse(responseData);
+            
+            // Tìm request đang hoạt động đầu tiên để xử lý phản hồi này
+            if (activeRequests.size > 0) {
+                const [requestId, callback] = [...activeRequests.entries()][0];
+                activeRequests.delete(requestId);
+                
+                // Kiểm tra nếu đây là phản hồi cho lệnh USE
+                for (const [id, req] of Object.entries(pendingQueries)) {
+                    const useMatch = req.query.match(/^use\s+(\w+)$/i);
+                    if (useMatch && !parsedData.error) {
+                        currentDatabase = useMatch[1];
+                        console.log(`[TCP] Database set to: ${currentDatabase}`);
+                    }
+                    
+                    // Kiểm tra nếu có thông báo lỗi về database
+                    if (parsedData.error && (
+                        parsedData.error.includes("database not selected") || 
+                        parsedData.error.includes("database doesn't exist"))) {
+                        currentDatabase = null;
+                        console.log('[TCP] Reset current database due to error in response');
+                    }
+                    
+                    // Xóa truy vấn khỏi danh sách đang chờ
+                    delete pendingQueries[id];
+                    break;
+                }
+                
+                callback(null, parsedData);
+            }
+        } catch (e) {
+            // Nếu không phải JSON hợp lệ, bỏ qua
+            console.log('[TCP] Received non-JSON data:', responseData);
+        }
+    });
+    
     socket.on('error', function(err) {
         console.error('[TCP] Socket error:', err.message);
-        persistentSocket = null;
-        isConnecting = false;
         
-        // Thông báo lỗi cho callback hiện tại
+        // KHÔNG đánh dấu socket đã bị đóng
+        // persistentSocket = null;
+        
+        // Thông báo lỗi cho callback hiện tại, nhưng không đóng kết nối
         callback(err);
         
         // Thông báo lỗi cho tất cả các callback trong hàng đợi
@@ -82,49 +123,58 @@ function ensureConnection(callback) {
         }
     });
     
-    socket.on('timeout', function() {
-        console.log('[TCP] Connection timeout');
-        socket.destroy();
-        persistentSocket = null;
-        isConnecting = false;
-        
-        const timeoutError = new Error('Connection timeout');
-        
-        // Thông báo lỗi cho callback hiện tại
-        callback(timeoutError);
-        
-        // Thông báo lỗi cho tất cả các callback trong hàng đợi
-        while (connectionQueue.length > 0) {
-            const queuedCallback = connectionQueue.shift();
-            queuedCallback(timeoutError);
-        }
-    });
-    
     socket.on('close', function() {
-        console.log('[TCP] Connection closed');
+        console.log('[TCP] Connection closed unexpectedly, will reconnect on next query');
+        
+        // Đánh dấu socket đã bị đóng để có thể tạo lại khi cần
         persistentSocket = null;
         
-        // Xử lý các yêu cầu đang hoạt động
+        // Thông báo cho tất cả các yêu cầu đang hoạt động
         for (const [requestId, callback] of activeRequests.entries()) {
-            callback(new Error('Connection closed'));
+            callback(new Error('Connection closed unexpectedly'));
             activeRequests.delete(requestId);
         }
     });
 }
 
+// Hàm để đảm bảo có kết nối TCP
+function ensureConnection(callback) {
+    // Nếu đã có kết nối và socket vẫn mở
+    if (persistentSocket && !persistentSocket.destroyed) {
+        callback(null, persistentSocket);
+        return;
+    }
+    
+    // Tạo kết nối mới
+    createConnection(callback);
+}
+
+// Theo dõi các truy vấn đang chờ xử lý
+let pendingQueries = {};
+
 // Hàm gửi truy vấn qua kết nối TCP liên tục
 function sendQuery(query, callback) {
-    const requestId = Date.now() + Math.random().toString(36).substring(2, 15);
+    const requestId = nextRequestId++;
     activeRequests.set(requestId, callback);
+    
+    // Lưu truy vấn vào danh sách đang chờ
+    pendingQueries[requestId] = {
+        query: query,
+        timestamp: Date.now()
+    };
     
     ensureConnection(function(err, socket) {
         if (err) {
             console.error('[QUERY] Connection error:', err.message);
             activeRequests.delete(requestId);
+            delete pendingQueries[requestId];
+            
+            // Vẫn thông báo lỗi nhưng không đóng kết nối
             return callback(err);
         }
         
         console.log(`[QUERY] Sending query: ${query}`);
+        lastActivity = Date.now();
         
         // Chuẩn hóa truy vấn
         let normalizedQuery = query.trim();
@@ -133,81 +183,31 @@ function sendQuery(query, callback) {
         }
         normalizedQuery = normalizedQuery.replace(/[^\x20-\x7E]/g, '');
         
-        // Biến để theo dõi xem callback đã được gọi chưa
-        let callbackCalled = false;
-        
-        // Đặt handler cho dữ liệu nhận về
-        const responseHandler = function(data) {
-            let responseData = data.toString('utf8');
-            console.log('[QUERY] Received data:', responseData);
-            
-            try {
-                // Kiểm tra xem có phải JSON hợp lệ không
-                const parsedData = JSON.parse(responseData);
+        // Tạo một timeout riêng cho truy vấn này (không phải cho socket)
+        const queryTimeout = setTimeout(function() {
+            if (activeRequests.has(requestId)) {
+                console.log(`[QUERY] Query timeout for request ${requestId}, but keeping connection open`);
                 
-                // Nếu là JSON hợp lệ, xóa request từ activeRequests và gọi callback
-                if (!callbackCalled) {
-                    callbackCalled = true;
-                    activeRequests.delete(requestId);
-                    
-                    // Kiểm tra nếu đây là phản hồi cho lệnh USE
-                    const useMatch = query.match(/^use\s+(\w+)$/i);
-                    if (useMatch && !parsedData.error) {
-                        currentDatabase = useMatch[1];
-                        console.log(`[QUERY] Database set to: ${currentDatabase}`);
-                    }
-                    
-                    // Kiểm tra nếu có thông báo lỗi về database
-                    if (parsedData.error && (
-                        parsedData.error.includes("database not selected") || 
-                        parsedData.error.includes("database doesn't exist"))) {
-                        currentDatabase = null;
-                        console.log('[QUERY] Reset current database due to error in response');
-                    }
-                    
-                    socket.removeListener('data', responseHandler);
-                    callback(null, parsedData);
-                }
-            } catch (e) {
-                // Nếu không phải JSON hợp lệ, có thể là do dữ liệu chưa nhận đủ
-                // Chúng ta sẽ chờ sự kiện data tiếp theo
-            }
-        };
-        
-        // Thiết lập timeout cho request
-        const requestTimeout = setTimeout(function() {
-            if (!callbackCalled) {
-                callbackCalled = true;
+                // Xóa khỏi danh sách đang chờ
                 activeRequests.delete(requestId);
-                socket.removeListener('data', responseHandler);
-                callback(new Error('Request timeout'));
+                delete pendingQueries[requestId];
+                
+                // Vẫn thông báo lỗi nhưng không đóng kết nối
+                callback(new Error('Query timeout'));
             }
-        }, 15000); // 15 giây timeout cho request
+        }, 10000); // 10 giây timeout cho truy vấn
         
-        socket.on('data', responseHandler);
-        
-        // Xử lý lỗi trong quá trình nhận dữ liệu
-        const errorHandler = function(err) {
-            if (!callbackCalled) {
-                callbackCalled = true;
-                activeRequests.delete(requestId);
-                clearTimeout(requestTimeout);
-                socket.removeListener('data', responseHandler);
-                socket.removeListener('error', errorHandler);
-                callback(err);
-            }
-        };
-        
-        socket.once('error', errorHandler);
+        // Lưu timeout vào danh sách đang chờ
+        pendingQueries[requestId].timeout = queryTimeout;
         
         // Gửi truy vấn
         socket.write(normalizedQuery, 'utf8', function(err) {
-            if (err && !callbackCalled) {
-                callbackCalled = true;
+            if (err) {
+                clearTimeout(queryTimeout);
                 activeRequests.delete(requestId);
-                clearTimeout(requestTimeout);
-                socket.removeListener('data', responseHandler);
-                socket.removeListener('error', errorHandler);
+                delete pendingQueries[requestId];
+                
+                console.log(`[QUERY] Error sending query: ${err.message}`);
                 callback(err);
             }
         });
@@ -251,6 +251,13 @@ app.post('/query', function(req, res) {
         }
 
         let responseSet = false;
+        
+        // Nếu kết nối hiện tại đã quá cũ (30 phút), tạo mới (nhưng không đóng cũ)
+        const inactivityTime = Date.now() - lastActivity;
+        if (inactivityTime > 30 * 60 * 1000) {
+            console.log('[SERVER] Connection inactive for 30 minutes, will create new connection');
+            persistentSocket = null; // Chỉ đánh dấu để tạo mới, không đóng
+        }
         
         sendQuery(query, function(error, result) {
             if (responseSet) return; // Tránh gửi phản hồi nhiều lần
@@ -306,6 +313,23 @@ app.post('/query', function(req, res) {
     }
 });
 
+// Ping endpoint để giữ kết nối TCP hoạt động
+app.get('/ping', function(req, res) {
+    lastActivity = Date.now(); // Cập nhật thời gian hoạt động cuối cùng
+    
+    if (persistentSocket && !persistentSocket.destroyed) {
+        res.json({ status: 'ok', connected: true, database: currentDatabase });
+    } else {
+        ensureConnection(function(err, socket) {
+            if (err) {
+                res.json({ status: 'error', connected: false, error: err.message });
+            } else {
+                res.json({ status: 'ok', connected: true, database: currentDatabase });
+            }
+        });
+    }
+});
+
 // Thêm endpoint để lấy database hiện tại
 app.get('/current-database', function(req, res) {
     res.json({ 
@@ -329,6 +353,15 @@ app.delete('/history', function(req, res) {
 const server = app.listen(PORT, function() {
     console.log(`Web server running on http://localhost:${PORT}`);
     console.log(`Ensure DuckSQL server is running on port 8080`);
+    
+    // Tạo kết nối ban đầu
+    ensureConnection(function(err, socket) {
+        if (err) {
+            console.error('[STARTUP] Failed to establish initial connection:', err.message);
+        } else {
+            console.log('[STARTUP] Initial connection established successfully');
+        }
+    });
 });
 
 // Xử lý khi ứng dụng đóng để đóng kết nối TCP
