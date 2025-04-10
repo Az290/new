@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DuckSQL Web Client</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>DuckSQL Web Client</h1>
+            <div class="server-status" id="serverStatus">
+                <span class="status-dot"></span>
+                <span>Chưa kết nối</span>
+            </div>
+        </header>
+
+        <div class="query-box">
+            <textarea id="queryInput" placeholder="Nhập truy vấn SQL (Ví dụ: showdb, select * from table_name)..."></textarea>
+            <div class="button-group">
+                <button id="executeBtn" class="primary">
+                    <span>Thực thi</span>
+                    <span class="shortcut">(Ctrl+Enter)</span>
+                </button>
+                <button id="clearBtn">Xóa</button>
+            </div>
+        </div>
+
+        <div class="result-container">
+            <div class="result-header">
+                <h2>Kết quả</h2>
+                <div class="result-meta" id="resultMeta"></div>
+            </div>
+            <div class="result-content">
+                <pre id="resultOutput">Kết quả sẽ hiển thị ở đây...</pre>
+            </div>
+        </div>
+
+        <div class="history-container">
+            <div class="history-header">
+                <h2>Lịch sử truy vấn <span id="historyCount">(0)</span></h2>
+                <button id="clearHistoryBtn">Xóa lịch sử</button>
+            </div>
+            <div class="history-list" id="historyList"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

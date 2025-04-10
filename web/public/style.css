@@ -1,0 +1,242 @@
+:root {
+    --primary-color: #4a6fa5;
+    --success-color: #4caf50;
+    --error-color: #f44336;
+    --warning-color: #ff9800;
+    --text-color: #333;
+    --light-gray: #f5f5f5;
+    --border-color: #ddd;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: var(--text-color);
+    background-color: #f9f9f9;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+header {
+    padding: 20px;
+    background-color: var(--primary-color);
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+h1 {
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+.server-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+}
+
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #ccc;
+}
+
+.status-dot.connected {
+    background-color: var(--success-color);
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.query-box {
+    padding: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#queryInput {
+    width: 100%;
+    height: 120px;
+    padding: 15px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-family: 'Consolas', monospace;
+    font-size: 0.95rem;
+    resize: vertical;
+    margin-bottom: 10px;
+}
+
+#queryInput:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(74, 111, 165, 0.2);
+}
+
+.button-group {
+    display: flex;
+    gap: 10px;
+}
+
+button {
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+button.primary {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+button.primary:hover {
+    background-color: #3a5a8f;
+}
+
+button:active {
+    transform: translateY(1px);
+}
+
+.shortcut {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    margin-left: 5px;
+}
+
+.result-container {
+    padding: 0 20px 20px;
+}
+
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.result-meta {
+    font-size: 0.85rem;
+    color: #666;
+}
+
+.result-content {
+    background-color: var(--light-gray);
+    border-radius: 4px;
+    padding: 15px;
+    min-height: 100px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+#resultOutput {
+    white-space: pre-wrap;
+    font-family: 'Consolas', monospace;
+    margin: 0;
+}
+
+.history-container {
+    padding: 20px;
+    background-color: #f5f7fa;
+    border-top: 1px solid var(--border-color);
+}
+
+.history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.history-item {
+    background: white;
+    padding: 12px 15px;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.history-item:hover {
+    background-color: #eef2f7;
+}
+
+.history-query {
+    font-weight: 500;
+    margin-bottom: 5px;
+    color: var(--primary-color);
+}
+
+.history-time {
+    font-size: 0.8rem;
+    color: #666;
+}
+
+.history-snippet {
+    font-size: 0.85rem;
+    color: #555;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* JSON pretty */
+.json-key {
+    color: #d63384;
+}
+.json-string {
+    color: #20a020;
+}
+.json-number {
+    color: #2080d0;
+}
+.json-boolean {
+    color: #d63384;
+}
+.json-null {
+    color: #808080;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .container {
+        border-radius: 0;
+    }
+    
+    header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+}
